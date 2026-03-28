@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jax Life Expectancy Risk Index</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        #map { height: 550px; border-radius: 1.5rem; z-index: 1; }
+        .risk-glow-4 { box-shadow: 0 0 20px rgba(239, 68, 68, 0.4); border: 2px solid #ef4444; }
+        .risk-glow-3 { box-shadow: 0 0 20px rgba(245, 158, 11, 0.4); border: 2px solid #f59e0b; }
+        .risk-glow-2 { box-shadow: 0 0 20px rgba(59, 130, 246, 0.4); border: 2px solid #3b82f6; }
+        .risk-glow-1 { box-shadow: 0 0 20px rgba(16, 185, 129, 0.4); border: 2px solid #10b981; }
+    </style>
+</head>
+<body class="bg-slate-50 font-sans text-slate-900">
+
+    <header class="bg-slate-900 text-white p-6 shadow-2xl">
+        <div class="container mx-auto flex flex-col md:flex-row justify-between items-center gap-6">
+            <div>
+                <h1 class="text-3xl font-black tracking-tighter uppercase">Life Expectancy <span class="text-blue-500">Risk Index</span></h1>
+                <p class="text-slate-400 text-xs font-mono">MCDA Technical Proof-of-Concept | Jacksonville, FL</p>
+            </div>
+            
+            <div class="relative w-full md:w-96 flex">
+                <input type="text" id="zipInput" placeholder="Enter a Jacksonville Zip Code" 
+                       class="w-full px-5 py-3 rounded-l-xl text-slate-900 font-bold focus:outline-none focus:ring-4 focus:ring-blue-500/50 transition-all">
+                <button onclick="calculateRisk()" class="bg-blue-600 hover:bg-blue-500 px-6 py-3 rounded-r-xl font-black uppercase transition-all">Analyze</button>
+            </div>
+        </div>
+    </header>
+
+    <main class="container mx-auto py-10 px-4">
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-10">
+            
+            <div class="lg:col-span-7 space-y-6">
+                <div class="bg-white p-2 rounded-3xl shadow-xl overflow-hidden">
+                    <div id="map"></div>
+                </div>
+                <div class="grid grid-cols-4 gap-2 text-[10px] uppercase font-bold text-center tracking-tighter">
+                    <div class="bg-emerald-100 text-emerald-700 p-2 rounded">0.0-0.25: Optimized</div>
+                    <div class="bg-blue-100 text-blue-700 p-2 rounded">0.26-0.50: Stable</div>
+                    <div class="bg-amber-100 text-amber-700 p-2 rounded">0.51-0.75: Vulnerable</div>
+                    <div class="bg-red-100 text-red-700 p-2 rounded">0.76-1.0: Critical</div>
+                </div>
+            </div>
+
+            <div class="lg:col-span-5 space-y-6">
+                
+                <div id="welcomeMessage" class="h-full flex flex-col items-center justify-center text-center p-10 bg-white rounded-3xl border-4 border-dashed border-slate-200">
+                    <div class="text-6xl mb-4 opacity-20">📊</div>
+                    <h2 class="text-xl font-bold text-slate-400">Enter a ZIP code to calculate the Cumulative Risk Score.</h2>
+                </div>
+
+                <div id="riskCard" class="hidden bg-white p-8 rounded-3xl shadow-2xl transition-all duration-500">
+                    <div class="flex justify-between items-end mb-6">
+                        <div>
+                            <span id="zoneBadge" class="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest bg-slate-100 text-slate-600 mb-2 inline-block">Zone Unknown</span>
+                            <h2 class="text-5xl font-black" id="scoreValue">0.00</h2>
+                            <p class="text-slate-400 text-xs font-bold uppercase mt-1">Cumulative Risk Score</p>
+                        </div>
+                        <div class="text-right">
+                            <h3 class="text-3xl font-bold text-slate-800" id="lifeExp">--</h3>
+                            <p class="text-slate-400 text-xs font-bold uppercase">Predicted Lifespan</p>
+                        </div>
+                    </div>
+
+                    <div class="w-full bg-slate-100 h-4 rounded-full overflow-hidden mb-8 border border-slate-200">
+                        <div id="riskBar" class="h-full bg-blue-600 transition-all duration-1000" style="width: 0%"></div>
+                    </div>
+
+                    <div class="space-y-4 mb-8">
+                        <div class="flex justify-between items-center text-sm">
+                            <span class="text-slate-500 font-medium">Socioeconomic Gradient (% Black)</span>
+                            <span class="font-bold" id="compRace">--</span>
+                        </div>
+                        <div class="flex justify-between items-center text-sm">
+                            <span class="text-slate-500 font-medium">Access to Education (BA+)</span>
+                            <span class="font-bold" id="compEdu">--</span>
+                        </div>
+                        <div class="flex justify-between items-center text-sm">
+                            <span class="text-slate-500 font-medium">Health Access (Uninsured)</span>
+                            <span class="font-bold" id="compHealth">--</span>
+                        </div>
+                        <div class="flex justify-between items-center text-sm">
+                            <span class="text-slate-500 font-medium">Median Household Income</span>
+                            <span class="font-bold" id="compIncome">--</span>
+                        </div>
+                    </div>
+
+                    <div class="bg-slate-900 rounded-2xl p-4 font-mono text-[10px] text-blue-400 leading-relaxed mb-6">
+                        <p class="text-slate-500 mb-2">// MCDA Risk Formula Calculation:</p>
+                        <p class="text-white">Risk = (0.26 × Norm_Race) + (0.25 × Norm_Edu) + (0.25 × Norm_Uninsured) + (0.24 × Norm_Income)</p>
+                    </div>
+
+                    <div id="actionPlan" class="p-5 rounded-2xl">
+                        <h4 class="font-black text-sm uppercase mb-2">Recommended Policy Intervention:</h4>
+                        <p id="interventionText" class="text-xs leading-relaxed font-medium">--</p>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </main>
+
+    <script>
+        // Real processed data from your Jacksonville CSVs
+        const jaxDb = {"32202": {"risk": 0.798, "lifeExp": 73.1, "edu": 11.2, "pov": 50.7, "income": 34825, "uninsured": 27.4, "lat": 30.324, "lon": -81.655}, "32204": {"risk": 0.401, "lifeExp": 75.5, "edu": 23.1, "pov": 30.3, "income": 65063, "uninsured": 14.7, "lat": 30.318, "lon": -81.681}, "32205": {"risk": 0.405, "lifeExp": 74.2, "edu": 16.9, "pov": 22.5, "income": 64789, "uninsured": 12.7, "lat": 30.317, "lon": -81.725}, "32206": {"risk": 0.734, "lifeExp": 70.7, "edu": 10.0, "pov": 65.6, "income": 39242, "uninsured": 18.9, "lat": 30.355, "lon": -81.645}, "32207": {"risk": 0.409, "lifeExp": 76.1, "edu": 17.5, "pov": 17.6, "income": 65234, "uninsured": 14.7, "lat": 30.3, "lon": -81.63}, "32208": {"risk": 0.762, "lifeExp": 70.8, "edu": 7.0, "pov": 75.1, "income": 41324, "uninsured": 17.4, "lat": 30.4, "lon": -81.66}, "32209": {"risk": 0.867, "lifeExp": 68.7, "edu": 5.8, "pov": 88.2, "income": 30514, "uninsured": 19.5, "lat": 30.36, "lon": -81.69}, "32210": {"risk": 0.552, "lifeExp": 74.9, "edu": 10.5, "pov": 38.0, "income": 61050, "uninsured": 15.8, "lat": 30.27, "lon": -81.74}, "32211": {"risk": 0.574, "lifeExp": 75.3, "edu": 10.2, "pov": 31.8, "income": 57021, "uninsured": 18.0, "lat": 30.33, "lon": -81.59}, "32212": {"risk": 0.581, "lifeExp": 77.2, "edu": 1.5, "pov": 12.3, "income": 51422, "uninsured": 16.3, "lat": 30.22, "lon": -81.68}, "32216": {"risk": 0.449, "lifeExp": 77.2, "edu": 15.8, "pov": 22.5, "income": 61821, "uninsured": 14.9, "lat": 30.28, "lon": -81.57}, "32217": {"risk": 0.331, "lifeExp": 77.8, "edu": 20.2, "pov": 13.4, "income": 73832, "uninsured": 13.0, "lat": 30.21, "lon": -81.61}, "32218": {"risk": 0.52, "lifeExp": 74.6, "edu": 12.0, "pov": 47.7, "income": 69638, "uninsured": 13.8, "lat": 30.47, "lon": -81.65}, "32219": {"risk": 0.529, "lifeExp": 74.3, "edu": 11.1, "pov": 52.4, "income": 72184, "uninsured": 13.4, "lat": 30.45, "lon": -81.79}, "32220": {"risk": 0.432, "lifeExp": 73.2, "edu": 8.4, "pov": 18.9, "income": 81792, "uninsured": 13.8, "lat": 30.34, "lon": -81.82}, "32221": {"risk": 0.436, "lifeExp": 77.5, "edu": 10.6, "pov": 32.1, "income": 82969, "uninsured": 12.7, "lat": 30.29, "lon": -81.86}, "32222": {"risk": 0.433, "lifeExp": 78.3, "edu": 13.7, "pov": 37.4, "income": 85649, "uninsured": 13.9, "lat": 30.2, "lon": -81.82}, "32223": {"risk": 0.203, "lifeExp": 80.7, "edu": 21.5, "pov": 5.4, "income": 95347, "uninsured": 10.1, "lat": 30.16, "lon": -81.62}, "32224": {"risk": 0.227, "lifeExp": 80.9, "edu": 22.9, "pov": 9.5, "income": 88259, "uninsured": 10.5, "lat": 30.27, "lon": -81.44}, "32225": {"risk": 0.256, "lifeExp": 79.1, "edu": 20.8, "pov": 14.9, "income": 90559, "uninsured": 10.7, "lat": 30.35, "lon": -81.48}, "32226": {"risk": 0.265, "lifeExp": 76.4, "edu": 15.0, "pov": 21.0, "income": 110179, "uninsured": 10.4, "lat": 30.48, "lon": -81.51}, "32227": {"risk": 0.483, "lifeExp": 72.7, "edu": 5.6, "pov": 20.3, "income": 85833, "uninsured": 16.7, "lat": 30.56, "lon": -81.44}, "32233": {"risk": 0.262, "lifeExp": 77.0, "edu": 19.9, "pov": 7.9, "income": 89185, "uninsured": 11.9, "lat": 30.33, "lon": -81.39}, "32234": {"risk": 0.395, "lifeExp": 74.7, "edu": 10.7, "pov": 22.7, "income": 87331, "uninsured": 12.6, "lat": 30.3, "lon": -82.02}, "32244": {"risk": 0.499, "lifeExp": 75.6, "edu": 13.5, "pov": 31.9, "income": 62204, "uninsured": 15.2, "lat": 30.22, "lon": -81.76}, "32246": {"risk": 0.326, "lifeExp": 77.2, "edu": 18.7, "pov": 13.8, "income": 80963, "uninsured": 13.1, "lat": 30.3, "lon": -81.51}, "32250": {"risk": 0.105, "lifeExp": 79.0, "edu": 23.9, "pov": 2.9, "income": 117724, "uninsured": 9.3, "lat": 30.28, "lon": -81.39}, "32254": {"risk": 0.787, "lifeExp": 70.6, "edu": 5.1, "pov": 61.1, "income": 34953, "uninsured": 20.1, "lat": 30.33, "lon": -81.72}, "32256": {"risk": 0.263, "lifeExp": 79.5, "edu": 25.6, "pov": 15.7, "income": 73570, "uninsured": 10.5, "lat": 30.2, "lon": -81.53}, "32257": {"risk": 0.316, "lifeExp": 78.5, "edu": 18.4, "pov": 9.3, "income": 75780, "uninsured": 12.1, "lat": 30.2, "lon": -81.59}, "32258": {"risk": 0.193, "lifeExp": 80.2, "edu": 22.9, "pov": 12.9, "income": 102204, "uninsured": 10.0, "lat": 30.12, "lon": -81.51}, "32266": {"risk": 0.0, "lifeExp": 83.0, "edu": 31.9, "pov": 0.0, "income": 119294, "uninsured": 7.1, "lat": 30.31, "lon": -81.39}, "32277": {"risk": 0.522, "lifeExp": 76.8, "edu": 11.4, "pov": 33.9, "income": 61554, "uninsured": 15.1, "lat": 30.37, "lon": -81.58}};
+
+        // Initialize Map
+        const map = L.map('map').setView([30.33, -81.65], 11);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png').addTo(map);
+
+        let activeMarker;
+
+        function calculateRisk() {
+            const zip = document.getElementById('zipInput').value.trim();
+            const data = jaxDb[zip];
+
+            if(!data) {
+                alert("Please enter a valid Jacksonville ZIP code (e.g., 32209).");
+                return;
+            }
+
+            // Reveal Dashboard
+            document.getElementById('welcomeMessage').classList.add('hidden');
+            const card = document.getElementById('riskCard');
+            card.classList.remove('hidden');
+
+            // Update Map
+            if(activeMarker) map.removeLayer(activeMarker);
+            map.flyTo([data.lat, data.lon], 13);
+            activeMarker = L.circleMarker([data.lat, data.lon], {
+                radius: 15, fillOpacity: 0.8, color: '#fff', weight: 2
+            }).addTo(map).bindPopup(`<b>ZIP: ${zip}</b><br>Risk Score: ${data.risk}`).openPopup();
+
+            // Stats
+            document.getElementById('scoreValue').innerText = data.risk.toFixed(2);
+            document.getElementById('lifeExp').innerText = data.lifeExp + "y";
+            document.getElementById('compRace').innerText = data.pov + "%";
+            document.getElementById('compEdu').innerText = data.edu + "%";
+            document.getElementById('compHealth').innerText = data.uninsured + "%";
+            document.getElementById('compIncome').innerText = "$" + data.income.toLocaleString();
+
+            // Score Logic & Coloring
+            const bar = document.getElementById('riskBar');
+            const badge = document.getElementById('zoneBadge');
+            const action = document.getElementById('actionPlan');
+            const text = document.getElementById('interventionText');
+            
+            bar.style.width = (data.risk * 100) + "%";
+            card.className = "bg-white p-8 rounded-3xl shadow-2xl transition-all duration-500 ";
+
+            if(data.risk <= 0.25) {
+                badge.innerText = "Zone 1: Optimized";
+                badge.className = "px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest bg-emerald-100 text-emerald-700 mb-2 inline-block";
+                card.classList.add("risk-glow-1");
+                bar.className = "h-full bg-emerald-500 transition-all duration-1000";
+                action.className = "p-5 rounded-2xl bg-emerald-50 text-emerald-900";
+                text.innerText = "Infrastructure is high-performing. Recommended path: Community mentorship programs and investment sharing with neighboring Zone 4 districts.";
+            } else if (data.risk <= 0.50) {
+                badge.innerText = "Zone 2: Stable";
+                badge.className = "px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest bg-blue-100 text-blue-700 mb-2 inline-block";
+                card.classList.add("risk-glow-2");
+                bar.className = "h-full bg-blue-500 transition-all duration-1000";
+                action.className = "p-5 rounded-2xl bg-blue-50 text-blue-900";
+                text.innerText = "Standard risk profile. Focus on long-term preventative health clinics and maintaining current educational attainment levels.";
+            } else if (data.risk <= 0.75) {
+                badge.innerText = "Zone 3: Vulnerable";
+                badge.className = "px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest bg-amber-100 text-amber-700 mb-2 inline-block";
+                card.classList.add("risk-glow-3");
+                bar.className = "h-full bg-amber-500 transition-all duration-1000";
+                action.className = "p-5 rounded-2xl bg-amber-50 text-amber-900";
+                text.innerText = "Compounding risks identified. Priority intervention: Mobile Medicaid enrollment hubs and local job training to address the income/health access gap.";
+            } else {
+                badge.innerText = "Zone 4: Critical";
+                badge.className = "px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest bg-red-100 text-red-700 mb-2 inline-block";
+                card.classList.add("risk-glow-4");
+                bar.className = "h-full bg-red-500 transition-all duration-1000";
+                action.className = "p-5 rounded-2xl bg-red-50 text-red-900";
+                text.innerText = "CRITICAL BURDEN: Deploy structural interventions. Eliminate food deserts via store subsidies and establish school-based health centers to counter low insurance rates.";
+            }
+        }
+    </script>
+</body>
+</html>
