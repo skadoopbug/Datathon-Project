@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jax Life Expectancy Risk Index</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600;700;900&display=swap" rel="stylesheet">
+    <style>
+        * { font-family: 'DM Sans', sans-serif; }
+        .mono { font-family: 'Space Mono', monospace; }
+        #map { height: 520px; border-radius: 1rem; z-index: 1; }
+        .risk-glow-4 { box-shadow: 0 0 28px rgba(239, 68, 68, 0.25); border: 1.5px solid #ef4444; }
+        .risk-glow-3 { box-shadow: 0 0 28px rgba(245, 158, 11, 0.25); border: 1.5px solid #f59e0b; }
+        .risk-glow-2 { box-shadow: 0 0 28px rgba(59, 130, 246, 0.25); border: 1.5px solid #3b82f6; }
+        .risk-glow-1 { box-shadow: 0 0 28px rgba(16, 185, 129, 0.25); border: 1.5px solid #10b981; }
+
+        .severity-critical { background: #fef2f2; border-left: 3px solid #ef4444; }
+        .severity-high     { background: #fffbeb; border-left: 3px solid #f59e0b; }
+        .severity-moderate { background: #eff6ff; border-left: 3px solid #3b82f6; }
+        .severity-low      { background: #f0fdf4; border-left: 3px solid #10b981; }
+
+        .badge-critical { background:#fee2e2; color:#dc2626; }
+        .badge-high     { background:#fef3c7; color:#b45309; }
+        .badge-moderate { background:#dbeafe; color:#1d4ed8; }
+        .badge-low      { background:#dcfce7; color:#16a34a; }
+
+        .cost-row { display:flex; justify-content:space-between; align-items:center; padding: 6px 0; border-bottom:1px solid rgba(0,0,0,0.05); }
+        .cost-row:last-child { border-bottom:none; }
+
+        .factor-bar-bg { background:#e5e7eb; border-radius:999px; height:6px; margin-top:6px; }
+        .factor-bar-fill { height:6px; border-radius:999px; transition: width 1s ease; }
+
+        #solutionsSection { display:none; }
+
+        .solution-card { background:white; border-radius:1.25rem; box-shadow:0 2px 20px rgba(0,0,0,0.07); overflow:hidden; transition: transform 0.2s; }
+        .solution-card:hover { transform: translateY(-2px); }
+
+        .tab-btn { cursor:pointer; padding:6px 14px; border-radius:999px; font-size:11px; font-weight:700; letter-spacing:0.05em; transition:all 0.2s; }
+        .tab-btn.active { background:#1e293b; color:white; }
+        .tab-btn:not(.active) { background:#f1f5f9; color:#64748b; }
+
+        .pulse-dot { width:8px; height:8px; border-radius:50%; display:inline-block; margin-right:6px; animation: pulse 2s infinite; }
+        @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.4; } }
+
+        .animate-in { animation: slideUp 0.4s ease forwards; opacity:0; }
+        @keyframes slideUp { from { opacity:0; transform:translateY(16px); } to { opacity:1; transform:translateY(0); } }
+        .delay-1 { animation-delay: 0.05s; }
+        .delay-2 { animation-delay: 0.1s; }
+        .delay-3 { animation-delay: 0.15s; }
+        .delay-4 { animation-delay: 0.2s; }
+
+        .total-cost-banner { background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); color:white; border-radius:1rem; }
+    </style>
+</head>
+<body class="bg-slate-100 text-slate-900">
+
+    <header class="bg-slate-900 text-white px-6 py-5 shadow-2xl">
+        <div class="container mx-auto flex flex-col md:flex-row justify-between items-center gap-5">
+            <div>
+                <h1 class="text-2xl font-black tracking-tight uppercase">Life Expectancy <span class="text-blue-400">Risk Index</span></h1>
+                <p class="text-slate-500 text-[11px] mono mt-0.5">MCDA Technical Proof-of-Concept · Jacksonville, FL</p>
+            </div>
+            <div class="w-full md:w-96 flex">
+                <input type="text" id="zipInput" placeholder="Enter a Jacksonville ZIP Code"
+                    onkeydown="if(event.key==='Enter')calculateRisk()"
+                    class="w-full px-4 py-3 rounded-l-xl text-slate-900 font-semibold focus:outline-none focus:ring-4 focus:ring-blue-500/40 transition-all text-sm">
+                <button onclick="calculateRisk()" class="bg-blue-600 hover:bg-blue-500 active:bg-blue-700 px-5 py-3 rounded-r-xl font-black uppercase text-sm transition-all tracking-wide">Analyze</button>
+            </div>
+        </div>
+    </header>
+
+    <main class="container mx-auto py-8 px-4 space-y-8">
+
+        <!-- TOP ROW: Map + Risk Card -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
+
+            <!-- Map -->
+            <div class="lg:col-span-7 space-y-4">
+                <div class="bg-white p-2 rounded-2xl shadow-lg overflow-hidden">
+                    <div id="map"></div>
+                </div>
+                <div class="grid grid-cols-4 gap-2 text-[10px] uppercase font-bold text-center tracking-tight mono">
+                    <div class="bg-emerald-50 text-emerald-700 border border-emerald-200 p-2 rounded-lg">0.0–0.25<br><span class="font-normal normal-case">Optimized</span></div>
+                    <div class="bg-blue-50 text-blue-700 border border-blue-200 p-2 rounded-lg">0.26–0.50<br><span class="font-normal normal-case">Stable</span></div>
+                    <div class="bg-amber-50 text-amber-700 border border-amber-200 p-2 rounded-lg">0.51–0.75<br><span class="font-normal normal-case">Vulnerable</span></div>
+                    <div class="bg-red-50 text-red-700 border border-red-200 p-2 rounded-lg">0.76–1.0<br><span class="font-normal normal-case">Critical</span></div>
+                </div>
+            </div>
+
+            <!-- Risk Card -->
+            <div class="lg:col-span-5">
+                <div id="welcomeMessage" class="h-full min-h-[300px] flex flex-col items-center justify-center text-center p-10 bg-white rounded-2xl border-2 border-dashed border-slate-200">
+                    <div class="text-5xl mb-4 opacity-20">📍</div>
+                    <h2 class="text-lg font-bold text-slate-400 leading-relaxed">Enter a ZIP code to generate<br>a Cumulative Risk Score + Solutions.</h2>
+                </div>
+
+                <div id="riskCard" class="hidden bg-white p-7 rounded-2xl shadow-lg transition-all duration-500">
+                    <!-- Score Header -->
+                    <div class="flex justify-between items-end mb-5">
+                        <div>
+                            <span id="zoneBadge" class="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest bg-slate-100 text-slate-600 mb-2 inline-block mono">Zone Unknown</span>
+                            <div class="flex items-baseline gap-2">
+                                <h2 class="text-5xl font-black mono" id="scoreValue">0.00</h2>
+                                <span class="text-slate-400 text-xs font-bold uppercase">/ 1.00</span>
+                            </div>
+                            <p class="text-slate-400 text-xs font-semibold uppercase mt-0.5 tracking-wide">Cumulative Risk Score</p>
+                        </div>
+                        <div class="text-right">
+                            <h3 class="text-3xl font-black mono text-slate-800" id="lifeExp">--</h3>
+                            <p class="text-slate-400 text-xs font-semibold uppercase tracking-wide">Predicted Lifespan</p>
+                        </div>
+                    </div>
+
+                    <!-- Progress Bar -->
+                    <div class="w-full bg-slate-100 h-3 rounded-full overflow-hidden mb-7 border border-slate-200">
+                        <div id="riskBar" class="h-full bg-blue-600 transition-all duration-1000 rounded-full" style="width:0%"></div>
+                    </div>
+
+                    <!-- Factor Rows with mini bars -->
+                    <div class="space-y-3 mb-7">
+                        <div class="factor-row">
+                            <div class="flex justify-between items-center text-sm mb-0.5">
+                                <span class="text-slate-500 font-medium">Socioeconomic Gradient (% below poverty)</span>
+                                <span class="font-bold mono text-xs" id="compRace">--</span>
+                            </div>
+                            <div class="factor-bar-bg"><div id="barRace" class="factor-bar-fill bg-rose-400" style="width:0%"></div></div>
+                        </div>
+                        <div class="factor-row">
+                            <div class="flex justify-between items-center text-sm mb-0.5">
+                                <span class="text-slate-500 font-medium">Access to Education (BA+ Rate)</span>
+                                <span class="font-bold mono text-xs" id="compEdu">--</span>
+                            </div>
+                            <div class="factor-bar-bg"><div id="barEdu" class="factor-bar-fill bg-violet-400" style="width:0%"></div></div>
+                        </div>
+                        <div class="factor-row">
+                            <div class="flex justify-between items-center text-sm mb-0.5">
+                                <span class="text-slate-500 font-medium">Health Access (Uninsured Rate)</span>
+                                <span class="font-bold mono text-xs" id="compHealth">--</span>
+                            </div>
+                            <div class="factor-bar-bg"><div id="barHealth" class="factor-bar-fill bg-amber-400" style="width:0%"></div></div>
+                        </div>
+                        <div class="factor-row">
+                            <div class="flex justify-between items-center text-sm mb-0.5">
+                                <span class="text-slate-500 font-medium">Median Household Income</span>
+                                <span class="font-bold mono text-xs" id="compIncome">--</span>
+                            </div>
+                            <div class="factor-bar-bg"><div id="barIncome" class="factor-bar-fill bg-sky-400" style="width:0%"></div></div>
+                        </div>
+                    </div>
+
+                    <!-- Formula -->
+                    <div class="bg-slate-900 rounded-xl p-4 mono text-[10px] text-blue-300 leading-relaxed mb-5">
+                        <p class="text-slate-500 mb-1">// MCDA Weighted Risk Formula:</p>
+                        <p class="text-slate-100 text-[9px] leading-5">Risk = (0.26 × Norm_Poverty) + (0.25 × Norm_Edu) +<br>(0.25 × Norm_Uninsured) + (0.24 × Norm_Income)</p>
+                    </div>
+
+                    <!-- Legacy Action Plan (kept small) -->
+                    <div id="actionPlan" class="p-4 rounded-xl bg-slate-50 border border-slate-100">
+                        <h4 class="font-black text-xs uppercase tracking-wide mb-1.5 text-slate-600">Overall Policy Priority:</h4>
+                        <p id="interventionText" class="text-xs leading-relaxed text-slate-600 font-medium">--</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SOLUTIONS SECTION -->
+        <div id="solutionsSection">
+            <div class="flex items-center justify-between mb-5">
+                <div>
+                    <h2 class="text-xl font-black uppercase tracking-tight">Factor-Specific <span class="text-blue-600">Solutions</span> & Cost Analysis</h2>
+                    <p class="text-slate-500 text-xs mono mt-0.5">Interventions calibrated to ZIP <span id="solutionZip" class="text-slate-800 font-bold"></span>'s actual factor values · All costs in 2025 USD</p>
+                </div>
+                <div id="totalCostBadge" class="text-right hidden">
+                    <div class="total-cost-banner px-5 py-3 text-center">
+                        <p class="text-slate-400 text-[10px] uppercase tracking-widest mono mb-0.5">5-Year Total Investment</p>
+                        <p id="totalCostValue" class="text-2xl font-black mono text-white"></p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 4 Solution Cards -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+                <!-- CARD 1: Socioeconomic -->
+                <div id="card-socio" class="solution-card animate-in delay-1">
+                    <div id="header-socio" class="px-6 pt-5 pb-4">
+                        <div class="flex items-start justify-between mb-3">
+                            <div>
+                                <span class="text-[10px] uppercase tracking-widest font-black text-slate-400 mono">Factor 01</span>
+                                <h3 class="text-base font-black mt-0.5">Socioeconomic Gradient</h3>
+                                <p class="text-xs text-slate-500 mt-0.5">Poverty rate &amp; structural disparity index</p>
+                            </div>
+                            <span id="badge-socio" class="px-2 py-1 rounded-lg text-[10px] font-black uppercase tracking-wide mono"></span>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <div class="text-2xl font-black mono" id="val-socio">--</div>
+                            <div class="flex-1">
+                                <div class="factor-bar-bg"><div id="fbar-socio" class="factor-bar-fill bg-rose-400" style="width:0%"></div></div>
+                                <div class="flex justify-between text-[9px] text-slate-400 mono mt-1"><span>0%</span><span>50%+</span></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="body-socio" class="px-6 pb-6 space-y-4"></div>
+                </div>
+
+                <!-- CARD 2: Education -->
+                <div id="card-edu" class="solution-card animate-in delay-2">
+                    <div id="header-edu" class="px-6 pt-5 pb-4">
+                        <div class="flex items-start justify-between mb-3">
+                            <div>
+                                <span class="text-[10px] uppercase tracking-widest font-black text-slate-400 mono">Factor 02</span>
+                                <h3 class="text-base font-black mt-0.5">Access to Education</h3>
+                                <p class="text-xs text-slate-500 mt-0.5">Bachelor's degree attainment rate (25+)</p>
+                            </div>
+                            <span id="badge-edu" class="px-2 py-1 rounded-lg text-[10px] font-black uppercase tracking-wide mono"></span>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <div class="text-2xl font-black mono" id="val-edu">--</div>
+                            <div class="flex-1">
+                                <div class="factor-bar-bg"><div id="fbar-edu" class="factor-bar-fill bg-violet-400" style="width:0%"></div></div>
+                                <div class="flex justify-between text-[9px] text-slate-400 mono mt-1"><span>0%</span><span>35%+</span></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="body-edu" class="px-6 pb-6 space-y-4"></div>
+                </div>
+
+                <!-- CARD 3: Health Access -->
+                <div id="card-health" class="solution-card animate-in delay-3">
+                    <div id="header-health" class="px-6 pt-5 pb-4">
+                        <div class="flex items-start justify-between mb-3">
+                            <div>
+                                <span class="text-[10px] uppercase tracking-widest font-black text-slate-400 mono">Factor 03</span>
+                                <h3 class="text-base font-black mt-0.5">Health Access</h3>
+                                <p class="text-xs text-slate-500 mt-0.5">Uninsured population rate</p>
+                            </div>
+                            <span id="badge-health" class="px-2 py-1 rounded-lg text-[10px] font-black uppercase tracking-wide mono"></span>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <div class="text-2xl font-black mono" id="val-health">--</div>
+                            <div class="flex-1">
+                                <div class="factor-bar-bg"><div id="fbar-health" class="factor-bar-fill bg-amber-400" style="width:0%"></div></div>
+                                <div class="flex justify-between text-[9px] text-slate-400 mono mt-1"><span>0%</span><span>30%+</span></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="body-health" class="px-6 pb-6 space-y-4"></div>
+                </div>
+
+                <!-- CARD 4: Income -->
+                <div id="card-income" class="solution-card animate-in delay-4">
+                    <div id="header-income" class="px-6 pt-5 pb-4">
+                        <div class="flex items-start justify-between mb-3">
+                            <div>
+                                <span class="text-[10px] uppercase tracking-widest font-black text-slate-400 mono">Factor 04</span>
+                                <h3 class="text-base font-black mt-0.5">Median Household Income</h3>
+                                <p class="text-xs text-slate-500 mt-0.5">Economic stability &amp; wage floor indicator</p>
+                            </div>
+                            <span id="badge-income" class="px-2 py-1 rounded-lg text-[10px] font-black uppercase tracking-wide mono"></span>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <div class="text-2xl font-black mono" id="val-income">--</div>
+                            <div class="flex-1">
+                                <div class="factor-bar-bg"><div id="fbar-income" class="factor-bar-fill bg-sky-400" style="width:0%"></div></div>
+                                <div class="flex justify-between text-[9px] text-slate-400 mono mt-1"><span>$0</span><span>$120K+</span></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="body-income" class="px-6 pb-6 space-y-4"></div>
+                </div>
+
+            </div>
+        </div>
+    </main>
+
+<script>
+const jaxDb = {"32202":{"risk":0.798,"lifeExp":73.1,"edu":11.2,"pov":50.7,"income":34825,"uninsured":27.4,"lat":30.324,"lon":-81.655},"32204":{"risk":0.401,"lifeExp":75.5,"edu":23.1,"pov":30.3,"income":65063,"uninsured":14.7,"lat":30.318,"lon":-81.681},"32205":{"risk":0.405,"lifeExp":74.2,"edu":16.9,"pov":22.5,"income":64789,"uninsured":12.7,"lat":30.317,"lon":-81.725},"32206":{"risk":0.734,"lifeExp":70.7,"edu":10.0,"pov":65.6,"income":39242,"uninsured":18.9,"lat":30.355,"lon":-81.645},"32207":{"risk":0.409,"lifeExp":76.1,"edu":17.5,"pov":17.6,"income":65234,"uninsured":14.7,"lat":30.3,"lon":-81.63},"32208":{"risk":0.762,"lifeExp":70.8,"edu":7.0,"pov":75.1,"income":41324,"uninsured":17.4,"lat":30.4,"lon":-81.66},"32209":{"risk":0.867,"lifeExp":68.7,"edu":5.8,"pov":88.2,"income":30514,"uninsured":19.5,"lat":30.36,"lon":-81.69},"32210":{"risk":0.552,"lifeExp":74.9,"edu":10.5,"pov":38.0,"income":61050,"uninsured":15.8,"lat":30.27,"lon":-81.74},"32211":{"risk":0.574,"lifeExp":75.3,"edu":10.2,"pov":31.8,"income":57021,"uninsured":18.0,"lat":30.33,"lon":-81.59},"32212":{"risk":0.581,"lifeExp":77.2,"edu":1.5,"pov":12.3,"income":51422,"uninsured":16.3,"lat":30.22,"lon":-81.68},"32216":{"risk":0.449,"lifeExp":77.2,"edu":15.8,"pov":22.5,"income":61821,"uninsured":14.9,"lat":30.28,"lon":-81.57},"32217":{"risk":0.331,"lifeExp":77.8,"edu":20.2,"pov":13.4,"income":73832,"uninsured":13.0,"lat":30.21,"lon":-81.61},"32218":{"risk":0.52,"lifeExp":74.6,"edu":12.0,"pov":47.7,"income":69638,"uninsured":13.8,"lat":30.47,"lon":-81.65},"32219":{"risk":0.529,"lifeExp":74.3,"edu":11.1,"pov":52.4,"income":72184,"uninsured":13.4,"lat":30.45,"lon":-81.79},"32220":{"risk":0.432,"lifeExp":73.2,"edu":8.4,"pov":18.9,"income":81792,"uninsured":13.8,"lat":30.34,"lon":-81.82},"32221":{"risk":0.436,"lifeExp":77.5,"edu":10.6,"pov":32.1,"income":82969,"uninsured":12.7,"lat":30.29,"lon":-81.86},"32222":{"risk":0.433,"lifeExp":78.3,"edu":13.7,"pov":37.4,"income":85649,"uninsured":13.9,"lat":30.2,"lon":-81.82},"32223":{"risk":0.203,"lifeExp":80.7,"edu":21.5,"pov":5.4,"income":95347,"uninsured":10.1,"lat":30.16,"lon":-81.62},"32224":{"risk":0.227,"lifeExp":80.9,"edu":22.9,"pov":9.5,"income":88259,"uninsured":10.5,"lat":30.27,"lon":-81.44},"32225":{"risk":0.256,"lifeExp":79.1,"edu":20.8,"pov":14.9,"income":90559,"uninsured":10.7,"lat":30.35,"lon":-81.48},"32226":{"risk":0.265,"lifeExp":76.4,"edu":15.0,"pov":21.0,"income":110179,"uninsured":10.4,"lat":30.48,"lon":-81.51},"32227":{"risk":0.483,"lifeExp":72.7,"edu":5.6,"pov":20.3,"income":85833,"uninsured":16.7,"lat":30.56,"lon":-81.44},"32233":{"risk":0.262,"lifeExp":77.0,"edu":19.9,"pov":7.9,"income":89185,"uninsured":11.9,"lat":30.33,"lon":-81.39},"32234":{"risk":0.395,"lifeExp":74.7,"edu":10.7,"pov":22.7,"income":87331,"uninsured":12.6,"lat":30.3,"lon":-82.02},"32244":{"risk":0.499,"lifeExp":75.6,"edu":13.5,"pov":31.9,"income":62204,"uninsured":15.2,"lat":30.22,"lon":-81.76},"32246":{"risk":0.326,"lifeExp":77.2,"edu":18.7,"pov":13.8,"income":80963,"uninsured":13.1,"lat":30.3,"lon":-81.51},"32250":{"risk":0.105,"lifeExp":79.0,"edu":23.9,"pov":2.9,"income":117724,"uninsured":9.3,"lat":30.28,"lon":-81.39},"32254":{"risk":0.787,"lifeExp":70.6,"edu":5.1,"pov":61.1,"income":34953,"uninsured":20.1,"lat":30.33,"lon":-81.72},"32256":{"risk":0.263,"lifeExp":79.5,"edu":25.6,"pov":15.7,"income":73570,"uninsured":10.5,"lat":30.2,"lon":-81.53},"32257":{"risk":0.316,"lifeExp":78.5,"edu":18.4,"pov":9.3,"income":75780,"uninsured":12.1,"lat":30.2,"lon":-81.59},"32258":{"risk":0.193,"lifeExp":80.2,"edu":22.9,"pov":12.9,"income":102204,"uninsured":10.0,"lat":30.12,"lon":-81.51},"32266":{"risk":0.0,"lifeExp":83.0,"edu":31.9,"pov":0.0,"income":119294,"uninsured":7.1,"lat":30.31,"lon":-81.39},"32277":{"risk":0.522,"lifeExp":76.8,"edu":11.4,"pov":33.9,"income":61554,"uninsured":15.1,"lat":30.37,"lon":-81.58}};
+
+const map = L.map('map').setView([30.33, -81.65], 11);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png').addTo(map);
+let activeMarker;
+
+// ─── SOLUTION DEFINITIONS ───────────────────────────────────────────────────
+
+function getSocioSolution(pov) {
+    if (pov >= 60) return {
+        severity: 'critical', label: 'Critical Disparity',
+        program: 'Guaranteed Basic Income Pilot + Community Land Trust',
+        description: 'Direct monthly cash transfers ($500–$800/household) paired with land trust acquisition to prevent displacement. Addresses root structural inequality.',
+        setup: 4500000, annual: 3200000, served: 2400,
+        items: [
+            { label: 'GBI Cash Transfers (monthly per HH)', val: '$600 avg' },
+            { label: 'Community Land Trust Acquisition', val: '$2.1M setup' },
+            { label: 'Anti-Displacement Legal Aid', val: '$180K/yr' },
+            { label: 'Wraparound Case Managers (12 FTE)', val: '$840K/yr' },
+        ]
+    };
+    if (pov >= 40) return {
+        severity: 'high', label: 'High Disparity',
+        program: 'Workforce Development Hub + Rental Assistance Program',
+        description: 'Sector-based job training tied to living-wage employers, combined with emergency rental assistance to stabilize households and prevent eviction cascade.',
+        setup: 1800000, annual: 1100000, served: 1500,
+        items: [
+            { label: 'Job Training Center (construction + equip)', val: '$1.1M setup' },
+            { label: 'Employer Incentive Subsidies', val: '$380K/yr' },
+            { label: 'Rental Assistance Fund', val: '$420K/yr' },
+            { label: 'Program Staff (6 FTE)', val: '$300K/yr' },
+        ]
+    };
+    if (pov >= 20) return {
+        severity: 'moderate', label: 'Moderate Disparity',
+        program: 'Financial Literacy Centers + Small Business Micro-Grants',
+        description: 'Credit-building workshops, EITC outreach, and $5K–$25K micro-grants for resident-owned small businesses to build community wealth.',
+        setup: 350000, annual: 280000, served: 800,
+        items: [
+            { label: 'Financial Coaching Partnerships', val: '$90K/yr' },
+            { label: 'Micro-Grant Pool', val: '$140K/yr' },
+            { label: 'EITC Enrollment Drives', val: '$50K/yr' },
+        ]
+    };
+    return {
+        severity: 'low', label: 'Low Disparity',
+        program: 'Community Investment Fund + Peer Mentorship Network',
+        description: 'Sustain gains through resident-led investment cooperatives and cross-neighborhood mentorship linking this ZIP with higher-risk zones.',
+        setup: 120000, annual: 90000, served: 400,
+        items: [
+            { label: 'Mentorship Coordinator (1 FTE)', val: '$65K/yr' },
+            { label: 'Community Investment Seed Fund', val: '$25K/yr' },
+        ]
+    };
+}
+
+function getEduSolution(edu) {
+    if (edu < 8) return {
+        severity: 'critical', label: 'Critical Gap',
+        program: 'Adult Literacy Centers + GED Pipeline + College Bridge Program',
+        description: 'Neighborhood-embedded adult learning centers open evenings/weekends, with childcare provided. Free GED prep, FAFSA assistance, and community college articulation agreements.',
+        setup: 2200000, annual: 950000, served: 1800,
+        items: [
+            { label: '3 Adult Literacy Center Buildouts', val: '$1.4M setup' },
+            { label: 'Instructors + Navigators (14 FTE)', val: '$700K/yr' },
+            { label: 'Childcare Subsidies During Classes', val: '$160K/yr' },
+            { label: 'GED + College Application Fees', val: '$90K/yr' },
+        ]
+    };
+    if (edu < 12) return {
+        severity: 'high', label: 'High Gap',
+        program: 'Vocational Training Centers + Employer Apprenticeship Network',
+        description: 'Fast-track 6–12 month credentials in high-demand trades (healthcare tech, HVAC, electrical, logistics) with employer guarantees and wage supplements during training.',
+        setup: 1100000, annual: 580000, served: 1200,
+        items: [
+            { label: 'Vocational Lab Equipment', val: '$750K setup' },
+            { label: 'Instructor Staff (8 FTE)', val: '$480K/yr' },
+            { label: 'Training Stipends ($200/wk)', val: '$100K/yr' },
+        ]
+    };
+    if (edu < 18) return {
+        severity: 'moderate', label: 'Moderate Gap',
+        program: 'Dual Enrollment Expansion + STEM After-School Programs',
+        description: 'Free dual enrollment agreements with Florida State College and Jacksonville University. After-school STEM labs at local libraries targeting middle/high schoolers.',
+        setup: 400000, annual: 260000, served: 700,
+        items: [
+            { label: 'Dual Enrollment Tuition Coverage', val: '$120K/yr' },
+            { label: 'STEM Lab Buildout (2 sites)', val: '$280K setup' },
+            { label: 'Program Staff (4 FTE)', val: '$140K/yr' },
+        ]
+    };
+    return {
+        severity: 'low', label: 'Strong Attainment',
+        program: 'Scholarship Endowment + Community Tutoring Network',
+        description: 'Sustain high attainment through a local scholarship endowment and peer tutoring network to support students who would otherwise fall through the cracks.',
+        setup: 80000, annual: 120000, served: 350,
+        items: [
+            { label: 'Scholarship Fund (annual disbursement)', val: '$80K/yr' },
+            { label: 'Tutoring Coordinator (1 FTE)', val: '$40K/yr' },
+        ]
+    };
+}
+
+function getHealthSolution(uninsured) {
+    if (uninsured >= 20) return {
+        severity: 'critical', label: 'Critical Access Gap',
+        program: 'Mobile Health Clinics + Mass Medicaid Enrollment Drive',
+        description: '3 dedicated mobile clinics providing primary care, dental, and mental health services 5 days/week. Paired with aggressive door-to-door Medicaid/ACA marketplace enrollment outreach.',
+        setup: 2800000, annual: 1400000, served: 3500,
+        items: [
+            { label: '3 Mobile Clinic Vehicles + Equipment', val: '$1.8M setup' },
+            { label: 'Medical Staff (18 FTE)', val: '$1.1M/yr' },
+            { label: 'Medicaid Enrollment Navigators (6)', val: '$300K/yr' },
+        ]
+    };
+    if (uninsured >= 16) return {
+        severity: 'high', label: 'High Access Gap',
+        program: 'Community Health Workers + Telehealth Expansion',
+        description: 'Hire resident community health workers (CHWs) embedded in neighborhoods. Subsidize telehealth devices and internet for uninsured households and expand FQHC sliding-scale services.',
+        setup: 700000, annual: 420000, served: 1800,
+        items: [
+            { label: '1 Mobile Clinic Vehicle', val: '$450K setup' },
+            { label: 'Community Health Workers (8 FTE)', val: '$320K/yr' },
+            { label: 'Telehealth Device + Data Subsidies', val: '$100K/yr' },
+        ]
+    };
+    if (uninsured >= 12) return {
+        severity: 'moderate', label: 'Moderate Gap',
+        program: 'Preventative Screening Hubs + Insurance Navigator Program',
+        description: 'Quarterly health screening events at community centers. Dedicated insurance navigators helping residents enroll in marketplace plans and access premium tax credits.',
+        setup: 220000, annual: 180000, served: 900,
+        items: [
+            { label: 'Screening Event Costs (4/yr)', val: '$60K/yr' },
+            { label: 'Insurance Navigators (3 FTE)', val: '$120K/yr' },
+        ]
+    };
+    return {
+        severity: 'low', label: 'Good Coverage',
+        program: 'Dental & Vision Expansion + Chronic Disease Prevention',
+        description: 'Extend existing health infrastructure to cover dental and vision gaps. Launch chronic disease prevention programs (diabetes, hypertension) to maintain low uninsured rates.',
+        setup: 80000, annual: 95000, served: 500,
+        items: [
+            { label: 'Dental/Vision Clinic Partnerships', val: '$45K/yr' },
+            { label: 'Wellness Program Coordinator', val: '$50K/yr' },
+        ]
+    };
+}
+
+function getIncomeSolution(income) {
+    if (income < 40000) return {
+        severity: 'critical', label: 'Critical Wage Floor',
+        program: 'Living Wage Ordinance + EITC Outreach + Employer Incentive Program',
+        description: 'Push for city-level $18/hr living wage floor. Aggressive EITC/CTC enrollment (avg $2,400 return/family). Employer incentives ($3K/worker) for businesses hiring residents at living wages.',
+        setup: 5000000, annual: 2800000, served: 4200,
+        items: [
+            { label: 'Employer Incentive Fund (yr 1)', val: '$2.5M setup' },
+            { label: 'EITC Enrollment Outreach (8 FTE)', val: '$480K/yr' },
+            { label: 'Wage Subsidy Bridge Payments', val: '$1.4M/yr' },
+            { label: 'Job Placement Case Managers (10)', val: '$700K/yr' },
+            { label: 'Emergency Stabilization Fund', val: '$220K/yr' },
+        ]
+    };
+    if (income < 60000) return {
+        severity: 'high', label: 'Low Wage Floor',
+        program: 'Sector-Based Job Training + Small Business Incubator',
+        description: 'Fast-track training in healthcare, tech, and trades linked to employers paying $20+/hr. Small business incubator with $10K–$50K launch grants and 18 months of free mentorship.',
+        setup: 1500000, annual: 900000, served: 2100,
+        items: [
+            { label: 'Training Center Buildout', val: '$900K setup' },
+            { label: 'Instructors + Business Coaches (10)', val: '$650K/yr' },
+            { label: 'Business Launch Grants Pool', val: '$250K/yr' },
+        ]
+    };
+    if (income < 80000) return {
+        severity: 'moderate', label: 'Moderate Income',
+        program: 'Skills Upskilling Initiative + Employer Partnership Network',
+        description: 'Short-term upskilling bootcamps (8–16 weeks) in data, project management, and healthcare admin. Employer pipeline guaranteeing interviews to completers.',
+        setup: 500000, annual: 380000, served: 1100,
+        items: [
+            { label: 'Bootcamp Curriculum + Platform', val: '$300K setup' },
+            { label: 'Instructors + Coordinators (5 FTE)', val: '$280K/yr' },
+            { label: 'Certification Vouchers', val: '$100K/yr' },
+        ]
+    };
+    return {
+        severity: 'low', label: 'Healthy Income Base',
+        program: 'Entrepreneurship Grants + Business Coaching Network',
+        description: 'Sustain economic health by investing in resident entrepreneurship. Grants up to $25K for new businesses, paired with 12 months of pro bono advisory support.',
+        setup: 150000, annual: 130000, served: 400,
+        items: [
+            { label: 'Entrepreneurship Grant Pool', val: '$80K/yr' },
+            { label: 'Business Coaching Coordinator', val: '$50K/yr' },
+        ]
+    };
+}
+
+// ─── RENDER HELPERS ──────────────────────────────────────────────────────────
+
+function severityClasses(sev) {
+    const map = {
+        critical: { card: 'severity-critical', badge: 'badge-critical', bar: '#ef4444' },
+        high:     { card: 'severity-high',     badge: 'badge-high',     bar: '#f59e0b' },
+        moderate: { card: 'severity-moderate', badge: 'badge-moderate', bar: '#3b82f6' },
+        low:      { card: 'severity-low',      badge: 'badge-low',      bar: '#10b981' },
+    };
+    return map[sev] || map.low;
+}
+
+function fmt(n) { return '$' + n.toLocaleString(); }
+
+function renderSolutionCard(prefix, solution, valDisplay, barPct) {
+    const cls = severityClasses(solution.severity);
+
+    // Header bg
+    document.getElementById('header-' + prefix).className =
+        'px-6 pt-5 pb-4 ' + cls.card;
+
+    // Badge
+    const badge = document.getElementById('badge-' + prefix);
+    badge.textContent = solution.label;
+    badge.className = 'px-2 py-1 rounded-lg text-[10px] font-black uppercase tracking-wide mono ' + cls.badge;
+
+    // Value display
+    document.getElementById('val-' + prefix).textContent = valDisplay;
+
+    // Factor bar
+    const fbar = document.getElementById('fbar-' + prefix);
+    setTimeout(() => { fbar.style.width = barPct + '%'; }, 200);
+    fbar.style.background = cls.bar;
+
+    // Five-year total
+    const fiveYear = solution.setup + (solution.annual * 5);
+    const costPerPerson = Math.round(solution.annual / solution.served);
+
+    const body = document.getElementById('body-' + prefix);
+    body.innerHTML = `
+        <div>
+            <p class="text-xs font-black uppercase tracking-wide text-slate-700 mb-1">${solution.program}</p>
+            <p class="text-xs text-slate-500 leading-relaxed">${solution.description}</p>
+        </div>
+
+        <div class="border border-slate-100 rounded-xl overflow-hidden">
+            <div class="bg-slate-50 px-4 py-2 border-b border-slate-100">
+                <span class="text-[10px] font-black uppercase tracking-widest text-slate-500 mono">Program Line Items</span>
+            </div>
+            <div class="px-4 py-3 space-y-0">
+                ${solution.items.map(i => `
+                    <div class="cost-row">
+                        <span class="text-xs text-slate-600">${i.label}</span>
+                        <span class="text-xs font-bold mono text-slate-800">${i.val}</span>
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+
+        <div class="grid grid-cols-3 gap-2">
+            <div class="bg-slate-50 rounded-xl p-3 text-center">
+                <p class="text-[9px] uppercase tracking-wide text-slate-400 mono mb-1">Setup Cost</p>
+                <p class="text-sm font-black mono text-slate-800">${fmt(solution.setup)}</p>
+            </div>
+            <div class="bg-slate-50 rounded-xl p-3 text-center">
+                <p class="text-[9px] uppercase tracking-wide text-slate-400 mono mb-1">Annual Cost</p>
+                <p class="text-sm font-black mono text-slate-800">${fmt(solution.annual)}</p>
+            </div>
+            <div class="bg-slate-50 rounded-xl p-3 text-center">
+                <p class="text-[9px] uppercase tracking-wide text-slate-400 mono mb-1">Est. Served</p>
+                <p class="text-sm font-black mono text-slate-800">${solution.served.toLocaleString()}</p>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-2">
+            <div class="bg-slate-900 rounded-xl p-3 text-center">
+                <p class="text-[9px] uppercase tracking-wide text-slate-500 mono mb-1">5-Year Total</p>
+                <p class="text-sm font-black mono text-white">${fmt(fiveYear)}</p>
+            </div>
+            <div class="bg-slate-900 rounded-xl p-3 text-center">
+                <p class="text-[9px] uppercase tracking-wide text-slate-500 mono mb-1">Cost / Person / Yr</p>
+                <p class="text-sm font-black mono text-white">${fmt(costPerPerson)}</p>
+            </div>
+        </div>
+    `;
+
+    return fiveYear;
+}
+
+// ─── MAIN CALCULATE ──────────────────────────────────────────────────────────
+
+function calculateRisk() {
+    const zip = document.getElementById('zipInput').value.trim();
+    const data = jaxDb[zip];
+    if (!data) { alert('Please enter a valid Jacksonville ZIP code (e.g., 32209).'); return; }
+
+    // Show risk card
+    document.getElementById('welcomeMessage').classList.add('hidden');
+    const card = document.getElementById('riskCard');
+    card.classList.remove('hidden');
+
+    // Map
+    if (activeMarker) map.removeLayer(activeMarker);
+    map.flyTo([data.lat, data.lon], 13);
+    activeMarker = L.circleMarker([data.lat, data.lon], {
+        radius: 14, fillOpacity: 0.85, color: '#fff', weight: 2.5, fillColor: '#3b82f6'
+    }).addTo(map).bindPopup(`<b>ZIP ${zip}</b><br>Risk Score: <b>${data.risk.toFixed(3)}</b><br>Life Expectancy: <b>${data.lifeExp}y</b>`).openPopup();
+
+    // Stats
+    document.getElementById('scoreValue').innerText = data.risk.toFixed(2);
+    document.getElementById('lifeExp').innerText = data.lifeExp + 'y';
+    document.getElementById('compRace').innerText = data.pov + '%';
+    document.getElementById('compEdu').innerText = data.edu + '%';
+    document.getElementById('compHealth').innerText = data.uninsured + '%';
+    document.getElementById('compIncome').innerText = '$' + data.income.toLocaleString();
+
+    // Factor mini-bars (capped at 100%)
+    setTimeout(() => {
+        document.getElementById('barRace').style.width   = Math.min(data.pov / 100 * 100, 100) + '%';
+        document.getElementById('barEdu').style.width    = Math.min(data.edu / 35 * 100, 100) + '%';
+        document.getElementById('barHealth').style.width = Math.min(data.uninsured / 30 * 100, 100) + '%';
+        document.getElementById('barIncome').style.width = Math.min(data.income / 120000 * 100, 100) + '%';
+    }, 100);
+
+    // Zone colors
+    const bar = document.getElementById('riskBar');
+    const badge = document.getElementById('zoneBadge');
+    const action = document.getElementById('actionPlan');
+    const text = document.getElementById('interventionText');
+    bar.style.width = (data.risk * 100) + '%';
+    card.className = 'bg-white p-7 rounded-2xl shadow-lg transition-all duration-500 ';
+
+    if (data.risk <= 0.25) {
+        badge.innerText = 'Zone 1: Optimized';
+        badge.className = 'px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest bg-emerald-100 text-emerald-700 mb-2 inline-block mono';
+        card.classList.add('risk-glow-1');
+        bar.className = 'h-full bg-emerald-500 transition-all duration-1000 rounded-full';
+        action.className = 'p-4 rounded-xl bg-emerald-50 border border-emerald-100';
+        text.innerText = 'Infrastructure is high-performing. Maintain gains through community mentorship and cross-district investment partnerships.';
+    } else if (data.risk <= 0.50) {
+        badge.innerText = 'Zone 2: Stable';
+        badge.className = 'px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest bg-blue-100 text-blue-700 mb-2 inline-block mono';
+        card.classList.add('risk-glow-2');
+        bar.className = 'h-full bg-blue-500 transition-all duration-1000 rounded-full';
+        action.className = 'p-4 rounded-xl bg-blue-50 border border-blue-100';
+        text.innerText = 'Standard risk profile. Focus on long-term preventative health clinics and maintaining educational attainment levels.';
+    } else if (data.risk <= 0.75) {
+        badge.innerText = 'Zone 3: Vulnerable';
+        badge.className = 'px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest bg-amber-100 text-amber-700 mb-2 inline-block mono';
+        card.classList.add('risk-glow-3');
+        bar.className = 'h-full bg-amber-500 transition-all duration-1000 rounded-full';
+        action.className = 'p-4 rounded-xl bg-amber-50 border border-amber-100';
+        text.innerText = 'Compounding risks identified. Prioritize Mobile Medicaid enrollment and job training to close the income/health access gap.';
+    } else {
+        badge.innerText = 'Zone 4: Critical';
+        badge.className = 'px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest bg-red-100 text-red-700 mb-2 inline-block mono';
+        card.classList.add('risk-glow-4');
+        bar.className = 'h-full bg-red-500 transition-all duration-1000 rounded-full';
+        action.className = 'p-4 rounded-xl bg-red-50 border border-red-100';
+        text.innerText = 'CRITICAL: Deploy structural interventions. Eliminate food deserts via store subsidies and establish school-based health centers to counter low insurance rates.';
+    }
+
+    // ── Render Solutions Section ─────────────────────────────────────────
+    document.getElementById('solutionsSection').style.display = 'block';
+    document.getElementById('solutionZip').textContent = zip;
+
+    const socioSol  = getSocioSolution(data.pov);
+    const eduSol    = getEduSolution(data.edu);
+    const healthSol = getHealthSolution(data.uninsured);
+    const incomeSol = getIncomeSolution(data.income);
+
+    const c1 = renderSolutionCard('socio',  socioSol,  data.pov + '%',               Math.min(data.pov / 100 * 100, 100));
+    const c2 = renderSolutionCard('edu',    eduSol,    data.edu + '%',                Math.min(data.edu / 35 * 100, 100));
+    const c3 = renderSolutionCard('health', healthSol, data.uninsured + '%',          Math.min(data.uninsured / 30 * 100, 100));
+    const c4 = renderSolutionCard('income', incomeSol, '$' + data.income.toLocaleString(), Math.min(data.income / 120000 * 100, 100));
+
+    const grandTotal = c1 + c2 + c3 + c4;
+    document.getElementById('totalCostBadge').classList.remove('hidden');
+    document.getElementById('totalCostValue').textContent = '$' + (grandTotal / 1000000).toFixed(1) + 'M';
+
+    // Re-trigger animations
+    ['card-socio','card-edu','card-health','card-income'].forEach((id, i) => {
+        const el = document.getElementById(id);
+        el.style.animation = 'none';
+        setTimeout(() => {
+            el.style.animation = '';
+            el.classList.add('animate-in', 'delay-' + (i+1));
+        }, 10);
+    });
+
+    // Scroll to solutions
+    setTimeout(() => {
+        document.getElementById('solutionsSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 400);
+}
+</script>
+</body>
+</html>
